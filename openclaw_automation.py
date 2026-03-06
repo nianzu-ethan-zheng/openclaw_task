@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field, validator
-from openclaw_sdk import OpenClawClient, AgentConfig
+from openclaw_sdk import OpenClawClient, AgentConfig, ExecutionOptions
 from openclaw_sdk.core.types import ExecutionResult
 
 
@@ -32,7 +32,8 @@ class SystemConfig(BaseModel):
 class InputDirConfig(BaseModel):
     """输入目录配置"""
     skill_dir: Dict[str, str] = Field(default_factory=dict, description="技能目录映射")
-    user_dir: Optional[str] = Field(None, description="用户特定文件夹")
+    user_dir: Optional[str] = Field(None, description="用户数据文件夹（如 PDF 等文件）")
+    agent_dir: Optional[str] = Field(None, description="Agent 源文件目录，包含各 agent 的子目录（如 agent_dir/paper_reader/SOUL.md）")
 
 
 class AgentConfigItem(BaseModel):
@@ -62,7 +63,7 @@ class AutomationConfig(BaseModel):
     # OpenClaw 连接配置
     gateway_ws_url: Optional[str] = Field(None, description="WebSocket 网关 URL")
     api_key: Optional[str] = Field(None, description="API Key")
-    workspace_base: str = Field("./workspaces", description="工作空间基础目录")
+    workspace_base: str = Field(r"C:\Users\nianzu\.openclaw\workspace", description="工作空间基础目录")
 
 
 # ============================================================================
@@ -77,8 +78,20 @@ class WorkspaceManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def get_agent_workspace(self, agent_name: str) -> Path:
-        """获取 Agent 工作空间路径"""
-        workspace = self.base_dir / agent_name
+        """获取 Agent 工作空间路径
+
+        规则：
+        - 如果 agent_name 是 "main"，返回 base_dir
+        - 否则返回 base_dir-agent_name (例如: workspace-paper_reader)
+        """
+        if agent_name == "main":
+            workspace = self.base_dir
+        else:
+            # 构造 workspace-<agent_name> 格式
+            parent = self.base_dir.parent
+            base_name = self.base_dir.name
+            workspace = parent / f"{base_name}-{agent_name}"
+
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
 
@@ -87,32 +100,36 @@ class WorkspaceManager:
         agent_name: str,
         config_files: List[str],
         skill_dirs: Dict[str, str],
+        agent_dir: Optional[str] = None,
         user_dir: Optional[str] = None
     ) -> None:
         """设置 Agent 工作空间文件
 
         Args:
             agent_name: Agent 名称
-            config_files: 配置文件列表（相对于 user_dir）
+            config_files: 配置文件列表（如 SOUL.md, USER.md）
             skill_dirs: 技能目录映射 {skill_name: source_path}
-            user_dir: 用户文件目录
+            agent_dir: Agent 源文件根目录（包含各 agent 子目录）
+            user_dir: 用户数据目录（整体复制到 workspace）
         """
         workspace = self.get_agent_workspace(agent_name)
 
-        # 复制配置文件
-        if user_dir:
-            user_path = Path(user_dir)
-            if user_path.exists():
+        # 1. 从 agent_dir/<agent_name>/ 复制配置文件（SOUL.md, USER.md 等）
+        if agent_dir and config_files:
+            agent_source = Path(agent_dir) / agent_name
+            if agent_source.exists():
                 for config_file in config_files:
-                    src = user_path / config_file
+                    src = agent_source / config_file
                     if src.exists():
                         dst = workspace / config_file
                         shutil.copy2(src, dst)
-                        print(f"  ✓ 复制配置文件: {config_file}")
+                        print(f"  ✓ 复制 Agent 配置: {config_file}")
                     else:
-                        print(f"  ⚠ 配置文件不存在: {src}")
+                        print(f"  ⚠ Agent 配置文件不存在: {src}")
+            else:
+                print(f"  ⚠ Agent 源目录不存在: {agent_source}")
 
-        # 复制技能目录
+        # 2. 复制技能目录
         for skill_name, skill_path in skill_dirs.items():
             src = Path(skill_path)
             if src.exists() and src.is_dir():
@@ -124,15 +141,23 @@ class WorkspaceManager:
             else:
                 print(f"  ⚠ 技能目录不存在: {src}")
 
-        # 复制用户目录的所有文件（可选）
+        # 3. 整体复制 user_dir 到 workspace
         if user_dir:
             user_path = Path(user_dir)
-            if user_path.exists():
-                for item in user_path.iterdir():
-                    if item.is_file() and item.name not in config_files:
-                        dst = workspace / item.name
-                        shutil.copy2(item, dst)
-                        print(f"  ✓ 复制用户文件: {item.name}")
+            if user_path.exists() and user_path.is_dir():
+                # 获取 user_dir 的目录名
+                user_dir_name = user_path.name
+                dst = workspace / user_dir_name
+
+                # 如果目标已存在，先删除
+                if dst.exists():
+                    shutil.rmtree(dst)
+
+                # 复制整个目录
+                shutil.copytree(user_path, dst)
+                print(f"  ✓ 复制用户目录: {user_dir_name}/ -> {dst}")
+            else:
+                print(f"  ⚠ 用户目录不存在或不是目录: {user_path}")
 
 
 # ============================================================================
@@ -245,9 +270,12 @@ class QueryOrchestrator:
 
             # 执行查询
             try:
+                # 创建执行选项（注意：字段名是 timeout_seconds）
+                options = ExecutionOptions(timeout_seconds=query.timeout) if query.timeout else None
+
                 result = await agent.execute(
                     query_text,
-                    timeout=query.timeout
+                    options=options
                 )
 
                 # 保存结果
@@ -342,8 +370,11 @@ class OpenClawAutomation:
         if self.config.api_key:
             connect_kwargs['api_key'] = self.config.api_key
 
-        # 使用 async with 正确管理客户端生命周期
-        async with OpenClawClient.connect(**connect_kwargs) as client:
+        # 注意：OpenClawClient.connect() 返回协程，需要先 await
+        # 然后返回的 OpenClawClient 实例才支持 async with
+        client = await OpenClawClient.connect(**connect_kwargs)
+
+        async with client:
             self.client = client
 
             # 1. 设置工作空间
@@ -369,6 +400,7 @@ class OpenClawAutomation:
                 agent_name=agent_config.name,
                 config_files=agent_config.config,
                 skill_dirs=self.config.input_dir.skill_dir,
+                agent_dir=self.config.input_dir.agent_dir,
                 user_dir=self.config.input_dir.user_dir
             )
 
