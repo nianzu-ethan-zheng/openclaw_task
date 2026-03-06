@@ -335,41 +335,30 @@ class OpenClawAutomation:
         print("🤖 OpenClaw 自动化任务系统")
         print("="*60)
 
-        try:
-            # 1. 连接到 OpenClaw
-            await self._connect()
-
-            # 2. 设置工作空间
-            await self._setup_workspaces()
-
-            # 3. 设置 Agents
-            await self._setup_agents()
-
-            # 4. 执行查询
-            results = await self._execute_queries()
-
-            # 5. 生成报告
-            self.query_orchestrator.generate_report("execution_report.txt")
-
-            return results
-
-        finally:
-            # 清理资源
-            if self.client:
-                await self.client.close()
-
-    async def _connect(self) -> None:
-        """连接到 OpenClaw 网关"""
-        print("\n🔌 连接到 OpenClaw...")
-
+        # 构建连接参数
         connect_kwargs = {}
         if self.config.gateway_ws_url:
             connect_kwargs['gateway_ws_url'] = self.config.gateway_ws_url
         if self.config.api_key:
             connect_kwargs['api_key'] = self.config.api_key
 
-        self.client = await OpenClawClient.connect(**connect_kwargs).__aenter__()
-        print("  ✓ 连接成功")
+        # 使用 async with 正确管理客户端生命周期
+        async with OpenClawClient.connect(**connect_kwargs) as client:
+            self.client = client
+
+            # 1. 设置工作空间
+            await self._setup_workspaces()
+
+            # 2. 设置 Agents
+            await self._setup_agents()
+
+            # 3. 执行查询
+            results = await self._execute_queries()
+
+            # 4. 生成报告
+            self.query_orchestrator.generate_report("execution_report.txt")
+
+            return results
 
     async def _setup_workspaces(self) -> None:
         """设置工作空间"""
