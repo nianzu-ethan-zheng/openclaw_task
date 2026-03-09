@@ -41,6 +41,44 @@
             border-bottom: 1px solid #e5e7eb;
         }
 
+        .drop-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 24px 16px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            background: #f9fafb;
+        }
+
+        .drop-zone:hover {
+            border-color: #10a37f;
+            background: #f0fdf4;
+        }
+
+        .drop-zone.drag-over {
+            border-color: #10a37f;
+            background: #d1fae5;
+            transform: scale(1.02);
+        }
+
+        .drop-zone-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .drop-zone-text {
+            font-size: 14px;
+            color: #374151;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .drop-zone-hint {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
         .folder-input-wrapper {
             position: relative;
             width: 100%;
@@ -51,25 +89,6 @@
             opacity: 0;
             width: 0;
             height: 0;
-        }
-
-        .folder-input-label {
-            display: block;
-            padding: 10px 16px;
-            background: #f3f4f6;
-            color: #374151;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            text-align: center;
-            transition: all 0.2s;
-        }
-
-        .folder-input-label:hover {
-            background: #e5e7eb;
-            border-color: #9ca3af;
         }
 
         .folder-path {
@@ -200,6 +219,7 @@
             max-width: 1200px;
             margin-left: auto;
             margin-right: auto;
+            padding: 0 16px;
         }
 
         .message-wrapper.user {
@@ -213,7 +233,8 @@
         .message {
             display: flex;
             gap: 12px;
-            max-width: 70%;
+            max-width: 75%;
+            min-width: 200px;
         }
 
         .message.user {
@@ -252,7 +273,24 @@
             line-height: 1.6;
             white-space: pre-wrap;
             word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
             font-size: 15px;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+        .message-content::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .message-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .message-content::-webkit-scrollbar-thumb {
+            background: #cbd5e0;
+            border-radius: 3px;
         }
 
         .message.user .message-content {
@@ -266,6 +304,48 @@
             background: #f0fdf4;
             color: #1a202c;
             border: 1px solid #d1fae5;
+        }
+
+        .thinking-block {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #fef3c7;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #92400e;
+        }
+
+        .thinking-label {
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #78350f;
+        }
+
+        .signature-text {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre;
+            overflow-x: auto;
+            padding: 8px;
+            background: #fffbeb;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .signature-text::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .signature-text::-webkit-scrollbar-track {
+            background: #fef3c7;
+        }
+
+        .signature-text::-webkit-scrollbar-thumb {
+            background: #fbbf24;
+            border-radius: 3px;
         }
 
         .empty-state {
@@ -341,13 +421,18 @@
             <div class="sidebar-header">
                 <div class="folder-input-wrapper">
                     <input type="file" id="folderInput" webkitdirectory directory multiple />
-                    <label for="folderInput" class="folder-input-label">📁 选择文件夹</label>
+                    <label for="folderInput" class="drop-zone" id="dropZone">
+                        <div class="drop-zone-icon">📁</div>
+                        <div class="drop-zone-text">点击选择文件夹</div>
+                        <div class="drop-zone-hint">或拖拽文件夹到这里</div>
+                    </label>
                 </div>
                 <div class="folder-path" id="folderPath"></div>
             </div>
             <div class="file-list" id="fileList">
                 <div class="empty-file-list">
-                    <p>请选择包含JSON文件的文件夹</p>
+                    <p>📂 将包含JSON文件的文件夹拖到上方</p>
+                    <p style="margin-top: 8px; font-size: 12px;">支持拖放或点击选择</p>
                 </div>
             </div>
         </div>
@@ -366,6 +451,7 @@
 
     <script>
         const folderInput = document.getElementById('folderInput');
+        const dropZone = document.getElementById('dropZone');
         const folderPath = document.getElementById('folderPath');
         const fileList = document.getElementById('fileList');
         const currentFileName = document.getElementById('currentFileName');
@@ -373,10 +459,83 @@
 
         let fileCache = new Map(); // 缓存文件对象
 
+        // 文件夹选择事件
         folderInput.addEventListener('change', handleFolderSelect);
+
+        // 拖放事件
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+
+            const items = e.dataTransfer.items;
+            if (!items || items.length === 0) return;
+
+            // 收集所有文件
+            const files = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === 'file') {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) {
+                        await traverseFileTree(entry, files);
+                    }
+                }
+            }
+
+            if (files.length > 0) {
+                processFiles(files);
+            }
+        });
+
+        // 递归遍历文件树
+        async function traverseFileTree(item, files, path = '') {
+            if (item.isFile) {
+                return new Promise((resolve) => {
+                    item.file((file) => {
+                        if (file.name.endsWith('.json')) {
+                            // 创建带路径信息的文件对象
+                            const fileWithPath = new File([file], file.name, {
+                                type: file.type,
+                                lastModified: file.lastModified
+                            });
+                            fileWithPath.fullPath = path + file.name;
+                            files.push(fileWithPath);
+                        }
+                        resolve();
+                    });
+                });
+            } else if (item.isDirectory) {
+                const dirReader = item.createReader();
+                return new Promise((resolve) => {
+                    dirReader.readEntries(async (entries) => {
+                        for (const entry of entries) {
+                            await traverseFileTree(entry, files, path + item.name + '/');
+                        }
+                        resolve();
+                    });
+                });
+            }
+        }
 
         function handleFolderSelect(event) {
             const files = Array.from(event.target.files);
+            processFiles(files);
+        }
+
+        function processFiles(files) {
             if (files.length === 0) return;
 
             // 过滤出JSON文件并按时间排序
@@ -391,9 +550,19 @@
 
             // 显示文件夹路径
             const firstFile = jsonFiles[0];
-            const pathParts = firstFile.webkitRelativePath.split('/');
-            const folderName = pathParts[0];
-            folderPath.textContent = `📂 ${folderName} (${jsonFiles.length} 个文件)`;
+            let folderName = '';
+
+            if (firstFile.webkitRelativePath) {
+                const pathParts = firstFile.webkitRelativePath.split('/');
+                folderName = pathParts[0];
+            } else if (firstFile.fullPath) {
+                const pathParts = firstFile.fullPath.split('/');
+                folderName = pathParts[0] || '根目录';
+            } else {
+                folderName = '已选择';
+            }
+
+            folderPath.textContent = `📂 ${folderName} (${jsonFiles.length} 个JSON文件)`;
 
             // 清空缓存
             fileCache.clear();
@@ -519,26 +688,57 @@
 
                 // 提取内容文本
                 let contentText = '';
+                let hasThinking = false;
+                let thinkingSignature = '';
+
                 if (typeof message.content === 'string') {
                     contentText = message.content;
                 } else if (Array.isArray(message.content)) {
                     // 处理content数组格式
-                    contentText = message.content.map(item => {
+                    const textParts = [];
+                    message.content.forEach(item => {
                         if (item.type === 'text') {
-                            return item.text;
+                            textParts.push(item.text);
+                        } else if (item.type === 'thinking') {
+                            hasThinking = true;
+                            if (item.thinking) {
+                                textParts.push(`💭 [思考过程]\n${item.thinking}`);
+                            }
+                            if (item.signature) {
+                                thinkingSignature = item.signature;
+                            }
                         } else if (item.type === 'image') {
-                            return '[图片]';
+                            textParts.push('[图片]');
                         } else if (item.type === 'image_url') {
-                            return '[图片URL]';
+                            textParts.push('[图片URL]');
                         } else {
-                            return JSON.stringify(item);
+                            textParts.push(JSON.stringify(item));
                         }
-                    }).join('\n');
+                    });
+                    contentText = textParts.join('\n');
                 } else {
                     contentText = JSON.stringify(message.content, null, 2);
                 }
 
                 contentDiv.textContent = contentText;
+
+                // 如果有thinking的signature，单独显示
+                if (hasThinking && thinkingSignature) {
+                    const thinkingBlock = document.createElement('div');
+                    thinkingBlock.className = 'thinking-block';
+
+                    const thinkingLabel = document.createElement('div');
+                    thinkingLabel.className = 'thinking-label';
+                    thinkingLabel.textContent = '🔐 Signature:';
+
+                    const signatureDiv = document.createElement('div');
+                    signatureDiv.className = 'signature-text';
+                    signatureDiv.textContent = thinkingSignature;
+
+                    thinkingBlock.appendChild(thinkingLabel);
+                    thinkingBlock.appendChild(signatureDiv);
+                    contentDiv.appendChild(thinkingBlock);
+                }
 
                 messageDiv.appendChild(avatar);
                 messageDiv.appendChild(contentDiv);
